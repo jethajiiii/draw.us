@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Toolbar } from "../../../components/canvas/Toolbar";
-import { DrawElement, Tool } from "../../../components/canvas/types";
+import { DrawElement, Tool } from "@repo/ui/components/canvas/types";
 import { getBoundingBox, isHit, drawArrowInfo, drawTriangle } from "../../../components/canvas/utils";
 import { WS_URL } from "../../config";
 

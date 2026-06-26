@@ -8,12 +8,14 @@ interface RoomContextType {
   socket: WebSocket | null;
   loading: boolean;
   roomId: string;
+  roomName: string;
 }
 
 const RoomContext = createContext<RoomContextType>({
   socket: null,
   loading: true,
   roomId: "",
+  roomName: "",
 });
 
 export function useRoom() {
@@ -31,6 +33,8 @@ export default function RoomLayout({
   const [loading, setLoading] = useState(true);
   const [roomIdStr, setRoomIdStr] = useState<string>("");
 
+  const [roomName, setRoomName] = useState<string>("");
+
   useEffect(() => {
     let wsInstance: WebSocket;
     const token = localStorage.getItem("token");
@@ -46,6 +50,10 @@ export default function RoomLayout({
         if (!data.room) return;
         const mappedRoomId = data.room.id.toString();
         setRoomIdStr(mappedRoomId);
+        
+        // Derive name from slug (e.g. "meeting-a1b2c3d4" -> "meeting")
+        const derivedName = slug.split('-').slice(0, -1).join(' ');
+        setRoomName(derivedName || slug);
         
         wsInstance = new WebSocket(`${WS_URL}?token=${token}`);
 
@@ -85,7 +93,7 @@ export default function RoomLayout({
   }, [slug]);
 
   return (
-    <RoomContext.Provider value={{ socket, loading, roomId: roomIdStr || slug }}>
+    <RoomContext.Provider value={{ socket, loading, roomId: roomIdStr || slug, roomName }}>
       {children}
     </RoomContext.Provider>
   );

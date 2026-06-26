@@ -1,6 +1,6 @@
 "use client";
 
-import { Tool } from "./types";
+import { Tool } from "@repo/ui/components/canvas/types";
 
 interface ToolbarProps {
   tool: Tool;

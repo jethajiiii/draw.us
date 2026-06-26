@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { JWT_SECRET } from "@repo/backend-common/config";
 import { middleware } from "./middleware.js";
 import { CreateUSerSchema, SignInSchema, CreateRoomSchema } from "@repo/common/types";
@@ -106,17 +107,27 @@ app.post('/room', middleware, async (req, res) => {
     //@ts-ignore
     const userId = req.userId;
 
-    const room = await prismaClient.room.create({
-        data: {
-            slug: parseData.data.name,
-            adminId: userId
-        }
-    })
+    const generatedSlug = randomUUID().substring(0, 8);
+    const compositeSlug = `${parseData.data.name.replace(/\s+/g, '-')}-${generatedSlug}`;
 
+    try {
+        const room = await prismaClient.room.create({
+            data: {
+                slug: compositeSlug,
+                adminId: userId
+            }
+        });
 
-    return res.json({
-        room
-    })
+        return res.json({
+            room
+        });
+    } catch (error) {
+        console.error("DEBUG PRI: Error creating room:", error);
+        return res.status(500).json({
+            message: "Internal Server Error",
+            error: String(error)
+        });
+    }
 })
 
 
