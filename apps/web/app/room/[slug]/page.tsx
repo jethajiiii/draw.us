@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRoom } from "./layout";
 import { Toolbar } from "../../../components/canvas/Toolbar";
 import { DrawElement, Tool } from "@repo/ui/components/canvas/types";
@@ -13,6 +13,8 @@ const HANDLE_SIZE = 8;
 
 export default function RoomPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isCallMode = searchParams.get("mode") === "draw-call";
   const { socket, loading, roomId, roomName } = useRoom();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -154,7 +156,7 @@ export default function RoomPage() {
 
       if (data.type === "webrtc_offer" && data.payload && data.fromSocketId) {
         const peer = getPeer(data.fromSocketId);
-        
+
         // Prevent glare / collision. If we are already negotiating, we might ignore this or just blindly overwrite.
         // Actually, setRemoteDescription handles Offers even in stable state (re-negotiation).
         peer.setRemoteDescription(new RTCSessionDescription(data.payload)).then(() => {
@@ -171,7 +173,7 @@ export default function RoomPage() {
           // Process any queued ICE candidates for this peer
           const queue = iceCandidatesQueueRef.current.get(data.fromSocketId!);
           if (queue) {
-            queue.forEach(c => peer.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
+            queue.forEach(c => peer.addIceCandidate(new RTCIceCandidate(c)).catch(() => { }));
             iceCandidatesQueueRef.current.delete(data.fromSocketId!);
           }
         }).catch(err => console.error("Error handling offer", err));
@@ -181,15 +183,15 @@ export default function RoomPage() {
         const peer = peersRef.current.get(data.fromSocketId);
         if (peer && peer.signalingState === "have-local-offer") {
           peer.setRemoteDescription(new RTCSessionDescription(data.payload)).then(() => {
-             // Process any queued ICE candidates
-             const queue = iceCandidatesQueueRef.current.get(data.fromSocketId!);
-             if (queue) {
-                queue.forEach(c => peer.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
-                iceCandidatesQueueRef.current.delete(data.fromSocketId!);
-             }
+            // Process any queued ICE candidates
+            const queue = iceCandidatesQueueRef.current.get(data.fromSocketId!);
+            if (queue) {
+              queue.forEach(c => peer.addIceCandidate(new RTCIceCandidate(c)).catch(() => { }));
+              iceCandidatesQueueRef.current.delete(data.fromSocketId!);
+            }
           }).catch(err => console.error("Error handling answer", err));
         } else if (peer && peer.signalingState !== "have-local-offer") {
-            console.warn(`[WebRTC] Ignored answer because state is: ${peer.signalingState}`);
+          console.warn(`[WebRTC] Ignored answer because state is: ${peer.signalingState}`);
         }
       }
 
@@ -285,22 +287,22 @@ export default function RoomPage() {
             peer.addTrack(track, stream);
           }
         });
-        
+
         // Renegotiate offer
         peer.createOffer().then(offer => {
           return peer.setLocalDescription(offer);
         }).then(() => {
-           // We need the socketId of this peer. We can find it by finding the key in peersRef that matches this peer.
-           let targetId: string | null = null;
-           peersRef.current.forEach((p, id) => { if (p === peer) targetId = id; });
-           if (targetId && socket && socket.readyState === WebSocket.OPEN && roomId) {
-             socket.send(JSON.stringify({
-               type: "webrtc_offer",
-               roomId,
-               toSocketId: targetId,
-               payload: peer.localDescription
-             }));
-           }
+          // We need the socketId of this peer. We can find it by finding the key in peersRef that matches this peer.
+          let targetId: string | null = null;
+          peersRef.current.forEach((p, id) => { if (p === peer) targetId = id; });
+          if (targetId && socket && socket.readyState === WebSocket.OPEN && roomId) {
+            socket.send(JSON.stringify({
+              type: "webrtc_offer",
+              roomId,
+              toSocketId: targetId,
+              payload: peer.localDescription
+            }));
+          }
         }).catch(err => console.error("Error renegotiating", err));
       });
 
@@ -666,35 +668,9 @@ export default function RoomPage() {
     resizeHandleRef.current = null;
   };
 
-  // ─── Resize Observer for live typing scaling ──────────────────────────────
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el || !editingText) return;
-
-    let initialHeight = 0;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const h = entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height;
-        if (!initialHeight && h > 0) {
-          initialHeight = h;
-          return;
-        }
-        if (initialHeight && h > 0) {
-          const ratio = h / initialHeight;
-          if (ratio > 1.02 || ratio < 0.98) {
-            setEditingText(prev => {
-              if (!prev) return prev;
-              return { ...prev, scale: (prev.scale || 1) * ratio };
-            });
-            initialHeight = h; // Reset anchor to new size
-          }
-        }
-      }
-    });
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [editingText?.id]);
+  // We don't use ResizeObserver on the textarea anymore because 
+  // it conflicts with programmatic width/height changes (like typing multi-line text).
+  // Text resizing is handled properly by canvas selection handles.
 
   // ─── Commit text helper ──────────────────────────────────────────────────
   const commitText = useCallback(() => {
@@ -773,6 +749,38 @@ export default function RoomPage() {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          onDoubleClick={(e) => {
+            const sp = toScene(e.clientX, e.clientY);
+            for (let i = elements.length - 1; i >= 0; i--) {
+              const el = elements[i]!;
+              if (el.type === "text" && isHit(sp.x, sp.y, el)) {
+                if (editingText) commitText();
+
+                const screenX = el.x! * cameraRef.current.zoom + cameraRef.current.x;
+                const screenY = el.y! * cameraRef.current.zoom + cameraRef.current.y;
+
+                setEditingText({
+                  ...el,
+                  screenX,
+                  screenY,
+                  text: el.text || "",
+                  scale: (el as any).scale || 1,
+                } as any);
+
+                // Hide from canvas while editing, will be re-added on blur
+                setElements(prev => prev.filter(e => e.id !== el.id));
+
+                setTimeout(() => {
+                  if (textareaRef.current) {
+                    textareaRef.current.focus();
+                    const len = textareaRef.current.value.length;
+                    textareaRef.current.setSelectionRange(len, len);
+                  }
+                }, 0);
+                return;
+              }
+            }
+          }}
           className={`block touch-none w-full h-full ${tool === "text" ? "cursor-text" : tool === "selection" ? "cursor-default" : "cursor-crosshair"}`}
         />
 
@@ -801,12 +809,12 @@ export default function RoomPage() {
               color: strokeColor,
               background: "rgba(168, 165, 255, 0.05)",
               border: "1px dashed #a8a5ff",
-              resize: "both",
+              resize: "none",
               padding: "4px 6px",
               lineHeight: 1.25,
               whiteSpace: "pre-wrap",
               overflow: "hidden",
-              textAlign: "center" as const,
+              textAlign: "left" as const,
               width: `${Math.max(60, Math.max(...editingText.text.split('\n').map(l => l.length)) * (strokeWidth || 2) * (editingText.scale || 1) * 12 * 0.55 * zoomUI + 16)}px`,
               height: `${Math.max(((strokeWidth || 2) * (editingText.scale || 1) * 12 * 1.25 * zoomUI) + 10, editingText.text.split('\n').length * (strokeWidth || 2) * (editingText.scale || 1) * 12 * 1.25 * zoomUI + 10)}px`
             }}
@@ -833,23 +841,23 @@ export default function RoomPage() {
       {/* Floating Bottom Left Context Card */}
       <div className="absolute bottom-6 left-6 z-20 flex items-end gap-4 pointer-events-auto">
         <div className="bg-white border-[3px] border-black rounded-2xl p-5 shadow-[6px_6px_0px_rgba(0,0,0,1)] flex flex-col items-start w-72">
-          
+
           <div className="flex justify-between items-start w-full">
             <span className="text-[10px] font-bold tracking-widest text-text-muted mb-1 uppercase mt-1">Current Space</span>
             {roomId && (
-               <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    alert("Room URL copied to clipboard!"); 
-                  }} 
-                  className="text-[10px] bg-zinc-100 hover:bg-zinc-200 text-zinc-600 px-2 py-1 rounded transition-colors flex gap-1.5 items-center font-bold border border-zinc-300 shadow-[1px_1px_0px_rgba(0,0,0,0.2)] active:translate-y-px active:shadow-none mb-1"
-               >
-                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
-                 Copy Link
-               </button>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href);
+                  alert("Room URL copied to clipboard!");
+                }}
+                className="text-[10px] bg-zinc-100 hover:bg-zinc-200 text-zinc-600 px-2 py-1 rounded transition-colors flex gap-1.5 items-center font-bold border border-zinc-300 shadow-[1px_1px_0px_rgba(0,0,0,0.2)] active:translate-y-px active:shadow-none mb-1"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                Copy Link
+              </button>
             )}
           </div>
-          
+
           <h2 className="text-xl font-bold tracking-tight mb-1 truncate w-full">{roomName || (roomId ? `Room #${roomId}` : "Loading…")}</h2>
           <div className="flex items-center gap-1.5 mb-4">
             <div className={`w-2 h-2 rounded-full border border-black ${socket ? "bg-success" : loading ? "bg-warning animate-pulse" : "bg-danger"}`} />
@@ -857,8 +865,8 @@ export default function RoomPage() {
               {socket ? `Connected • ${Object.keys(remoteStreams).length + 1} online` : loading ? "Connecting…" : "Disconnected"}
             </span>
           </div>
-          
-          {!hasMedia ? (
+
+          {isCallMode && (!hasMedia ? (
             <button onClick={joinCall} className="w-full bg-accent text-white font-bold text-sm px-6 py-2.5 rounded-lg border-[3px] border-black shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all cursor-pointer flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
               Join Call
@@ -867,7 +875,7 @@ export default function RoomPage() {
             <div className="flex gap-3 w-full">
               <button onClick={toggleAudio} className={`flex-1 font-bold text-sm py-2 rounded-lg border-[3px] border-black shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer flex items-center justify-center gap-2 ${isAudioMuted ? 'bg-danger/20 text-danger' : 'bg-success/20 text-success-dark'}`}>
                 {isAudioMuted ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0-4H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0-4H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 ) : (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                 )}
@@ -875,53 +883,55 @@ export default function RoomPage() {
               </button>
               <button onClick={toggleVideo} className={`flex-1 font-bold text-sm py-2 rounded-lg border-[3px] border-black shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer flex items-center justify-center gap-2 ${isVideoMuted ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-white'}`}>
                 {isVideoMuted ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 ) : (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 )}
                 {isVideoMuted ? 'No Cam' : 'Cam On'}
               </button>
             </div>
-          )}
+          ))}
         </div>
       </div>
 
       {/* Video Streams Container (Right Side Stack) */}
-      <div className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-20 pointer-events-auto max-h-[80vh] overflow-y-auto p-2 scrollbar-hide">
-        {hasMedia && (
-          <div className="w-48 h-32 bg-black rounded-lg border-[3px] border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] overflow-hidden relative shrink-0">
-             <video 
-                autoPlay 
-                playsInline 
-                muted 
+      {isCallMode && (
+        <div className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-20 pointer-events-auto max-h-[80vh] overflow-y-auto p-2 scrollbar-hide">
+          {hasMedia && (
+            <div className="w-48 h-32 bg-black rounded-lg border-[3px] border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] overflow-hidden relative shrink-0">
+              <video
+                autoPlay
+                playsInline
+                muted
                 ref={(el) => {
                   if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
                     el.srcObject = localStreamRef.current;
                   }
-                }} 
-                className={`w-full h-full object-cover transform scale-x-[-1] transition-opacity duration-300 ${isVideoMuted ? 'opacity-0' : 'opacity-100'}`} 
-             />
-             {isVideoMuted && (
+                }}
+                className={`w-full h-full object-cover transform scale-x-[-1] transition-opacity duration-300 ${isVideoMuted ? 'opacity-0' : 'opacity-100'}`}
+              />
+              {isVideoMuted && (
                 <div className="absolute inset-0 flex items-center justify-center bg-zinc-800">
-                   <svg className="w-8 h-8 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg className="w-8 h-8 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
-             )}
-             <div className="absolute bottom-1.5 right-1.5 bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded backdrop-blur-sm border border-zinc-700">You</div>
-          </div>
-        )}
+              )}
+              <div className="absolute bottom-1.5 right-1.5 bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded backdrop-blur-sm border border-zinc-700">You</div>
+            </div>
+          )}
 
-        {Object.entries(remoteStreams).map(([socketId, stream]) => (
-          <div key={socketId} className="w-48 h-32 bg-black rounded-lg border-[3px] border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] overflow-hidden relative shrink-0">
-            <video
-              autoPlay
-              playsInline
-              ref={(el) => { if (el) el.srcObject = stream; }}
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute bottom-1.5 right-1.5 bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded backdrop-blur-sm border border-zinc-700">Peer</div>
-          </div>
-        ))}
-      </div>
+          {Object.entries(remoteStreams).map(([socketId, stream]) => (
+            <div key={socketId} className="w-48 h-32 bg-black rounded-lg border-[3px] border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] overflow-hidden relative shrink-0">
+              <video
+                autoPlay
+                playsInline
+                ref={(el) => { if (el) el.srcObject = stream; }}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute bottom-1.5 right-1.5 bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded backdrop-blur-sm border border-zinc-700">Peer</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Floating Bottom Right Zoom Pill */}
       <div className="absolute bottom-6 right-6 z-20 bg-white border-[3px] border-black rounded-full px-5 py-2.5 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex items-center gap-4">

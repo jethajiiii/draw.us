@@ -150,6 +150,60 @@ app.get('/room/:slug', middleware, async (req, res) => {
     });
 });
 
+app.get('/rooms', middleware, async (req, res) => {
+    //@ts-ignore
+    const userId = req.userId;
+    try {
+        const rooms = await prismaClient.room.findMany({
+            where: {
+                adminId: userId
+            }
+        });
+        return res.json({
+            rooms
+        });
+    } catch (e) {
+        console.error(e);
+        return res.status(500).json({
+            message: "Internal Server Error"
+        });
+    }
+});
+
+app.delete('/room/:roomId', middleware, async (req, res) => {
+    //@ts-ignore
+    const userId = req.userId;
+    const roomId = Number(req.params.roomId);
+
+    if (isNaN(roomId)) {
+        return res.status(400).json({ message: "Invalid room ID" });
+    }
+
+    try {
+        // Verify ownership
+        const room = await prismaClient.room.findUnique({
+            where: { id: roomId }
+        });
+
+        if (!room) {
+            return res.status(404).json({ message: "Room not found" });
+        }
+
+        if (room.adminId !== userId) {
+            return res.status(403).json({ message: "Unauthorized to delete this room" });
+        }
+
+        await prismaClient.room.delete({
+            where: { id: roomId }
+        });
+
+        return res.json({ message: "Room deleted successfully" });
+    } catch (e) {
+        console.error("Error deleting room:", e);
+        return res.status(500).json({ message: "Internal Server Error", error: String(e) });
+    }
+});
+
 app.get("/chats/:roomId", middleware, async (req, res) => {
     const roomId = Number(req.params.roomId);
     if (isNaN(roomId)) {
