@@ -9,7 +9,8 @@ dotenv.config({
     path: "../../.env"
 })
 
-const wss = new WebSocketServer({ port: 8080 });
+const PORT = parseInt(process.env.PORT || "8080");
+const wss = new WebSocketServer({ port: PORT });
 
 interface User {
     ws: WebSocket;
