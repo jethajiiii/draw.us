@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { WS_URL } from "../../config";
+import { WS_URL, BACKEND_URL } from "../../config";
 
 interface RoomContextType {
   socket: WebSocket | null;
@@ -40,7 +40,7 @@ export default function RoomLayout({
     const token = localStorage.getItem("token");
 
     // Load integer ID from HTTP backend
-    fetch(`http://localhost:3001/room/${slug}`, {
+    fetch(`${BACKEND_URL}/room/${slug}`, {
       headers: {
         Authorization: token || ""
       }

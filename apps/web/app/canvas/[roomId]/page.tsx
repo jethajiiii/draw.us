@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { Toolbar } from "../../../components/canvas/Toolbar";
 import { DrawElement, Tool } from "@repo/ui/components/canvas/types";
 import { getBoundingBox, isHit, drawArrowInfo, drawTriangle } from "../../../components/canvas/utils";
-import { WS_URL } from "../../config";
+import { WS_URL, BACKEND_URL } from "../../config";
 
 type Action = "none" | "drawing" | "moving" | "resizing";
 const HANDLE_SIZE = 8;
@@ -42,7 +42,7 @@ export default function CanvasPage() {
     let ws: WebSocket;
 
     // First: resolve slug → integer room ID
-    fetch(`http://localhost:3001/room/${roomId}`, {
+    fetch(`${BACKEND_URL}/room/${roomId}`, {
       headers: {
         Authorization: token || ""
       }
