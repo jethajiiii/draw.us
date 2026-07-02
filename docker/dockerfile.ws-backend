@@ -1,0 +1,37 @@
+FROM node:20-alpine
+
+RUN npm i -g pnpm
+
+WORKDIR /app
+
+# Copy lockfile and workspace config
+COPY pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml ./
+COPY package.json ./
+
+# Copy package.json for ws-backend and its workspace dependencies
+COPY apps/ws-backend/package.json ./apps/ws-backend/
+COPY packages/backend-common/package.json ./packages/backend-common/
+COPY packages/db/package.json ./packages/db/
+COPY packages/typescript-config/package.json ./packages/typescript-config/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY apps/ws-backend/ ./apps/ws-backend/
+COPY packages/backend-common/ ./packages/backend-common/
+COPY packages/db/ ./packages/db/
+COPY packages/typescript-config/ ./packages/typescript-config/
+COPY packages/eslint-config/ ./packages/eslint-config/
+
+# Generate Prisma client
+RUN cd packages/db && npx prisma generate
+
+# Build all dependency packages first, then the app
+RUN pnpm --filter @repo/backend-common run build
+RUN pnpm --filter @repo/db run build
+RUN pnpm --filter ws-backend run build
+
+CMD ["node", "apps/ws-backend/dist/index.js"]

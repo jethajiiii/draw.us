@@ -1,0 +1,35 @@
+FROM node:20-alpine
+
+RUN npm i -g pnpm
+
+WORKDIR /app
+
+COPY pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml ./
+COPY package.json ./
+
+COPY apps/http-backend/package.json ./apps/http-backend/
+COPY packages/common/package.json ./packages/common/
+COPY packages/backend-common/package.json ./packages/backend-common/
+COPY packages/db/package.json ./packages/db/
+COPY packages/typescript-config/package.json ./packages/typescript-config/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/http-backend/ ./apps/http-backend/
+COPY packages/common/ ./packages/common/
+COPY packages/backend-common/ ./packages/backend-common/
+COPY packages/db/ ./packages/db/
+COPY packages/typescript-config/ ./packages/typescript-config/
+COPY packages/eslint-config/ ./packages/eslint-config/
+
+RUN cd packages/db && npx prisma generate
+
+# Build all packages in dependency order
+RUN pnpm --filter @repo/common run build
+RUN pnpm --filter @repo/backend-common run build
+RUN pnpm --filter @repo/db run build
+RUN pnpm --filter http-backend run build
+
+CMD ["node", "apps/http-backend/dist/index.js"]

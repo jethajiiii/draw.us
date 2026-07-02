@@ -4,7 +4,10 @@
   "type": "module",
   "main": "index.js",
   "exports": {
-    "./client": "./src/index.ts"
+    "./client": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
     "build": "tsc -b",
